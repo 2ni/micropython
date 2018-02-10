@@ -9,7 +9,7 @@ git remote add upstream git@github.com:micropython/micropython.git
 git fetch upstream
 ```
 
-## Differences
+## Differences with original micropython repo
 This clone added a mymodule.c and frq.c.
 - mymodule.c contains simple helloworld examples
 - frq.c contains functions to get the frequency on an input pin with GPIO interrupt

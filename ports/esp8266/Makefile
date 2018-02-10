@@ -59,6 +59,8 @@ LDFLAGS += --gc-sections
 endif
 
 SRC_C = \
+	frq.c \
+	mymodule.c \
 	strtoll.c \
 	main.c \
 	help.c \

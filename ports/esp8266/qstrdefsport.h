@@ -29,3 +29,6 @@
 // Entries for sys.path
 Q(/)
 Q(/lib)
+Q(mymodule)
+Q(hello)
+Q(frq)
