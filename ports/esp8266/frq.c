@@ -1,8 +1,17 @@
 /*
- * https://www.espressif.com/sites/default/files/documentation/2c-esp8266_non_os_sdk_api_reference_en.pdf
+ * ESP8266 reference: https://www.espressif.com/sites/default/files/documentation/2c-esp8266_non_os_sdk_api_reference_en.pdf
+ * Base docs on howto add a module:
+ * - http://micropython-dev-docs.readthedocs.io/en/latest/adding-module.html
+ * - https://www.stefannaumann.de/en/2017/07/adding-a-module-to-micropython/
  *
+ * c implementation of frequency counter with GPIO interrupt
+ * as same implementation in python is way too slow
+ *
+ * frequency on GPIO12 up to ~280kHz
+ *
+ * Usage example:
  * >>> import frq as f
- * >>> f.measure()
+ * >>> f.get()
  * frequency: 3.2kHz
  */
 
@@ -42,8 +51,8 @@ void subscribe_isr(void (*isr)()) {
 }
 
 /*
- * just check how tick counting works with time measurement
- * not yet visible
+ * just a dummy function to check how time measurement with ticks works
+ * not exposed
  */
 void _check_ticks() {
     uint32 factor = (system_rtc_clock_cali_proc()*1000)>>12;
@@ -79,9 +88,8 @@ STATIC mp_obj_t frq_get(void) {
     while (system_get_time()<(s+MEASURE_TIME)) {
         ;
     }
-    printf("count: %d\n", count);
-
-    return mp_const_none;
+    //printf("count: %d\n", count);
+    return mp_obj_new_int(count);
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_0(frq_get_obj, frq_get);
 
