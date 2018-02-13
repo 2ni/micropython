@@ -41,7 +41,7 @@ void clear_isr() {
 void subscribe_isr(void (*isr)()) {
     ETS_GPIO_INTR_DISABLE();
 
-    ETS_GPIO_INTR_ATTACH(isr, 12); // GPIO12 interrupt handler
+    ETS_GPIO_INTR_ATTACH(isr, 12); // GPIO12/D6 interrupt handler
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO12); // Set GPIO12 function
     gpio_output_set(0, 0, 0, GPIO_ID_PIN(12)); // Set GPIO12 as input
     GPIO_REG_WRITE(GPIO_STATUS_W1TC_ADDRESS, BIT(12)); // Clear GPIO12 status
@@ -63,7 +63,8 @@ void _check_ticks() {
 }
 
 // ********************************* measure by ticks *********************************
-
+#define MEASURE_TIME 10000 // in us
+#define MEASURE_AMOUNT 3 // how many times shall we measure to calculate average
 volatile uint32 count;
 
 void ICACHE_FLASH_ATTR isr_measure_count() {
@@ -75,21 +76,26 @@ void ICACHE_FLASH_ATTR isr_measure_count() {
 
 /*
  * function get()
- * measures frequency by counting ticks during given time period
+ * measures frequency in kHz by counting ticks during given time period
  */
 STATIC mp_obj_t frq_get(void) {
     unsigned long s;
 
     subscribe_isr(isr_measure_count);
-    count = 0;
 
-    #define MEASURE_TIME 100000 // in us
-    s = system_get_time();
-    while (system_get_time()<(s+MEASURE_TIME)) {
-        ;
+    int total_count = 0;
+
+    // get average measurements
+    for (int c=0; c<MEASURE_AMOUNT; c++) {
+        count = 0;
+        s = system_get_time();
+        while (system_get_time()<(s+MEASURE_TIME)) {
+            ; // wait for interrupts
+        }
+        total_count += count;
+        //printf("count (%d): %d\n", c, count);
     }
-    //printf("count: %d\n", count);
-    return mp_obj_new_int(count);
+    return mp_obj_new_float((float)total_count/MEASURE_AMOUNT*1000/MEASURE_TIME);
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_0(frq_get_obj, frq_get);
 
@@ -150,11 +156,11 @@ STATIC mp_obj_t frq_get_byduration(void) {
         f = SAMPLES/((f_end-f_start)*factor/1e3/1e6)/1e3; // kHz
     }
 
-    printf("ticks start: %d, ticks end: %d, ticks diff: %d\n", f_start, f_end, f_end-f_start);
-    printf("frequency: %d.%01dkHz\n", (int)f, (int)(f*10)%10);
-    printf("isr_count: %d\n", isr_count);
+    //printf("ticks start: %d, ticks end: %d, ticks diff: %d\n", f_start, f_end, f_end-f_start);
+    //printf("frequency: %d.%01dkHz\n", (int)f, (int)(f*10)%10);
+    //printf("isr_count: %d\n", isr_count);
 
-    return mp_const_none;
+    return mp_obj_new_float(f);
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_0(frq_get_byduration_obj, frq_get_byduration);
 
