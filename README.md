@@ -2,11 +2,19 @@ See README_MICROPYTHON.md for micropython readme.
 
 
 ## Keep fork up-to-date with original repo
+https://help.github.com/articles/syncing-a-fork/
+```
+git fetch upstream
+git checkout master
+git merge upstream/master
+```
+
 ```
 git clone git@github.com:2ni/micropython.git
 cd micropython
 git remote add upstream git@github.com:micropython/micropython.git
 git fetch upstream
+git pull upstream master
 ```
 
 ## Differences with original micropython repo
