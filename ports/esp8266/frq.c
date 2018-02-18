@@ -31,21 +31,47 @@
 
 // ********************************* common functions *********************************
 
-void clear_isr() {
-    // clear interrupts status
-    uint32 s = GPIO_REG_READ(GPIO_STATUS_ADDRESS);
-    GPIO_REG_WRITE(GPIO_STATUS_W1TC_ADDRESS, s);
-    ETS_GPIO_INTR_ENABLE();
-}
+// http://www.openmyr.com/blog/2016/06/esp8266-output-gpio-and-optimization/
+// https://github.com/trebisky/esp8266/blob/06436dc11c74cac69c0c47ba37e8fe54ea807474/Projects/misc/blink_any.c
+//  https://myesp8266.blogspot.ch/2015/03/esp8266-with-arduino-flavor.html
+#define Z 0
+static const int mux[] = {
+	PERIPHS_IO_MUX_GPIO0_U, /* 0 - D3 */
+	PERIPHS_IO_MUX_U0TXD_U, /* 1 - uart */
+	PERIPHS_IO_MUX_GPIO2_U, /* 2 - D4 */
+	PERIPHS_IO_MUX_U0RXD_U, /* 3 - uart */
+	PERIPHS_IO_MUX_GPIO4_U, /* 4 - D2 */
+	PERIPHS_IO_MUX_GPIO5_U, /* 5 - D1 */
+	Z, /* 6  mystery */
+	Z, /* 7  mystery */
+	Z, /* 8  mystery */
+	PERIPHS_IO_MUX_SD_DATA2_U, /* 9 - D11 (SD2) */
+	PERIPHS_IO_MUX_SD_DATA3_U, /* 10 - D12 (SD3) */
+	Z, /* 11  mystery */
+	PERIPHS_IO_MUX_MTDI_U, /* 12 - D6 */
+	PERIPHS_IO_MUX_MTCK_U, /* 13 - D7 */
+	PERIPHS_IO_MUX_MTMS_U, /* 14 - D5 */
+	PERIPHS_IO_MUX_MTDO_U /* 15 - D8 */
+};
+static const int func[] = { 0, 3, 0, 3, 0, 0, Z, Z, Z, 3, 3, Z, 3, 3, 3, 3 };
+// for some reasons some pins are not advised to be used
+static const int evil[] = { 0, 1, 0, 1,   0, 0, 1, 1,   1, 1, 1, 1,   0, 0, 0, 0 };
 
-void subscribe_isr(void (*isr)()) {
+void subscribe_isr(void (*isr)(), int gpio, int *ok) {
     ETS_GPIO_INTR_DISABLE();
+    if(ok) {*ok=0;}
 
-    ETS_GPIO_INTR_ATTACH(isr, 12); // GPIO12/D6 interrupt handler
-    PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO12); // Set GPIO12 function
-    gpio_output_set(0, 0, 0, GPIO_ID_PIN(12)); // Set GPIO12 as input
-    GPIO_REG_WRITE(GPIO_STATUS_W1TC_ADDRESS, BIT(12)); // Clear GPIO12 status
-    gpio_pin_intr_state_set(GPIO_ID_PIN(12), GPIO_PIN_INTR_POSEDGE); // Interrupt on any GPIO12 edge
+    if (!evil[gpio]) {
+        PIN_FUNC_SELECT(mux[gpio], func[gpio]);
+
+        gpio_output_set(0, 0, 0, GPIO_ID_PIN(gpio));
+        GPIO_REG_WRITE(GPIO_STATUS_W1TC_ADDRESS, BIT(gpio));
+
+        ETS_GPIO_INTR_ATTACH(isr, gpio);
+        gpio_pin_intr_state_set(GPIO_ID_PIN(gpio), GPIO_PIN_INTR_POSEDGE);
+
+        if(ok) {*ok=1;}
+    }
 
     ETS_GPIO_INTR_ENABLE() ;
 }
@@ -67,21 +93,29 @@ void _check_ticks() {
 #define MEASURE_AMOUNT 3 // how many times shall we measure to calculate average
 volatile uint32 count;
 
-void ICACHE_FLASH_ATTR isr_measure_count() {
+void ICACHE_FLASH_ATTR isr_measure_count(int gpio) {
     ETS_GPIO_INTR_DISABLE();
-    count++;
 
-    clear_isr();
+    uint32 gpio_status = GPIO_REG_READ(GPIO_STATUS_ADDRESS);
+    if(gpio_status & BIT(gpio)) {
+        count++;
+    }
+
+    GPIO_REG_WRITE(GPIO_STATUS_W1TC_ADDRESS, gpio_status);
+
+    ETS_GPIO_INTR_ENABLE();
 }
 
 /*
- * function get()
+ * function get(GPIO)
  * measures frequency in kHz by counting ticks during given time period
  */
-STATIC mp_obj_t frq_get(void) {
+STATIC mp_obj_t frq_get(mp_obj_t gpio) {
     unsigned long s;
+    int ok;
 
-    subscribe_isr(isr_measure_count);
+    subscribe_isr(isr_measure_count, mp_obj_get_int(gpio), &ok);
+    if(!ok) {return mp_obj_new_float((float)-1);}
 
     int total_count = 0;
 
@@ -97,7 +131,7 @@ STATIC mp_obj_t frq_get(void) {
     }
     return mp_obj_new_float((float)total_count/MEASURE_AMOUNT*1000/MEASURE_TIME);
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_0(frq_get_obj, frq_get);
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(frq_get_obj, frq_get);
 
 
 
@@ -111,20 +145,23 @@ volatile int isr_finished;
 volatile int isr_count;
 
 //void ICACHE_FLASH_ATTR isr_time(uint mask, void* arg) {
-void ICACHE_FLASH_ATTR isr_measure_time() {
-    ETS_GPIO_INTR_DISABLE();
-    if (isr_count==0) {
-        f_start = system_get_rtc_time();
-    } else if (isr_count==SAMPLES) {
-        f_end = system_get_rtc_time();
-        isr_finished=1;
-    }
-    isr_count++;
+void ICACHE_FLASH_ATTR isr_measure_time(int gpio) {
+    uint32 gpio_status = GPIO_REG_READ(GPIO_STATUS_ADDRESS);
+    if(gpio_status & BIT(gpio)) {
+        ETS_GPIO_INTR_DISABLE();
+        if (isr_count==0) {
+            f_start = system_get_rtc_time();
+        } else if (isr_count==SAMPLES) {
+            f_end = system_get_rtc_time();
+            isr_finished=1;
+        }
+        isr_count++;
 
-    clear_isr();
+        GPIO_REG_WRITE(GPIO_STATUS_W1TC_ADDRESS, gpio_status);
 
-    if (isr_finished != 1) {
-        ETS_GPIO_INTR_ENABLE();
+        if (isr_finished != 1) {
+            ETS_GPIO_INTR_ENABLE();
+        }
     }
 }
 
@@ -132,9 +169,11 @@ void ICACHE_FLASH_ATTR isr_measure_time() {
  * function get_byduration()
  * measures frequency by measuring time some ticks take
  */
-STATIC mp_obj_t frq_get_byduration(void) {
+STATIC mp_obj_t frq_get_byduration(mp_obj_t gpio) {
 
-    subscribe_isr(isr_measure_time);
+    int ok;
+    subscribe_isr(isr_measure_time, mp_obj_get_int(gpio), &ok);
+    if(!ok) {return mp_obj_new_float((float)-1);}
 
     isr_finished = 0;
     isr_count = 0;
@@ -162,7 +201,7 @@ STATIC mp_obj_t frq_get_byduration(void) {
 
     return mp_obj_new_float(f);
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_0(frq_get_byduration_obj, frq_get_byduration);
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(frq_get_byduration_obj, frq_get_byduration);
 
 /*
  * module declarations
